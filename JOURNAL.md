@@ -17,3 +17,8 @@
 
 **Done:**
 - Learning the basics of Rust
+
+## 2026-09-19 — Day 3
+
+**Done:**
+- Opening /dev/kvm
