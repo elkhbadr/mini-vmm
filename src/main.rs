@@ -4,6 +4,7 @@ use std::io;
 const KVMIO: u32 = 0xAE;
 const KVM_GET_API_VERSION: u64 = libc::_IO(KVMIO, 0x00);
 const KVM_CREATE_VM: u64 = libc::_IO(KVMIO, 0x01);
+const KVM_CREATE_VCPU: u64 = libc::_IO(KVMIO, 0x41);
 
 fn open_kvm() -> io::Result<i32> {
     let path_kvm = CString::new("/dev/kvm").unwrap();
@@ -44,6 +45,16 @@ fn create_vm(kvm: i32) -> io::Result<i32> {
     return Ok(vm_fd);
 }
 
+fn create_vcpu(vm_fd: i32) -> io::Result<i32> {
+    let vcpu_fd = unsafe { libc::ioctl(vm_fd, KVM_CREATE_VCPU, 0) };
+
+    if vcpu_fd < 0 {
+        let err = Err(io::Error::last_os_error());
+        return err;
+    }
+    return Ok(vcpu_fd);
+}
+
 fn main() {
     let kvm_fd = match open_kvm() {
         Ok(fd) => {
@@ -56,8 +67,27 @@ fn main() {
         }
     };
 
-    match create_vm(kvm_fd) {
-        Ok(vm_fd) => println!("VM created with success, fd = {vm_fd}"),
-        Err(e) => eprintln!("error creating VM : {e}"),
-    }
+    let vm_fd = match create_vm(kvm_fd) {
+        Ok(fd) => {
+            println!("VM created with success, fd = {fd}");
+            fd
+        }
+        Err(e) => {
+            eprintln!("error creating VM : {e}");
+            return;
+        }
+    };
+
+    let vcpu_fd = match create_vcpu(vm_fd) {
+        Ok(fd) => {
+            println!("vCPU created with success, fd = {fd}");
+            fd
+        }
+        Err(e) => {
+            eprintln!("error creating vCPU : {e}");
+            return;
+        }
+    };
+
+    println!("vCPU fd = {vcpu_fd}");
 }
