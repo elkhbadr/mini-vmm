@@ -3,6 +3,7 @@ use std::io;
 
 const KVMIO: u32 = 0xAE;
 const KVM_GET_API_VERSION: u64 = libc::_IO(KVMIO, 0x00);
+const KVM_CREATE_VM: u64 = libc::_IO(KVMIO, 0x01);
 
 fn open_kvm() -> io::Result<i32> {
     let path_kvm = CString::new("/dev/kvm").unwrap();
@@ -31,12 +32,32 @@ fn open_kvm() -> io::Result<i32> {
     }
     println!("kvm version is {}", ret);
     return Ok(kvm);
-}   
+}
+
+fn create_vm(kvm: i32) -> io::Result<i32> {
+    let vm_fd = unsafe { libc::ioctl(kvm, KVM_CREATE_VM, 0) };
+
+    if vm_fd < 0 {
+        let err = Err(io::Error::last_os_error());
+        return err;
+    }
+    return Ok(vm_fd);
+}
 
 fn main() {
-    let _ = open_kvm();
-    match open_kvm() {
-        Ok(kvm_fd) => println!("KVM open with success, fd = {kvm_fd}"),
-        Err(e) => eprintln!("error opening KVM : {e}"),
+    let kvm_fd = match open_kvm() {
+        Ok(fd) => {
+            println!("KVM open with success, fd = {fd}");
+            fd
+        }
+        Err(e) => {
+            eprintln!("error opening KVM : {e}");
+            return;
+        }
+    };
+
+    match create_vm(kvm_fd) {
+        Ok(vm_fd) => println!("VM created with success, fd = {vm_fd}"),
+        Err(e) => eprintln!("error creating VM : {e}"),
     }
 }

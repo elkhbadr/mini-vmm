@@ -22,3 +22,8 @@
 
 **Done:**
 - Opening /dev/kvm
+
+## 2026-09-24 — Day 4
+
+**Done:**
+- Creating VM and vCPU
