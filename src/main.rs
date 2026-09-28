@@ -7,7 +7,9 @@ const KVM_GET_API_VERSION: u64 = libc::_IO(KVMIO, 0x00);
 const KVM_CREATE_VM: u64 = libc::_IO(KVMIO, 0x01);
 const KVM_CREATE_VCPU: u64 = libc::_IO(KVMIO, 0x41);
 const MEM_SIZE: usize = 0x100000;
+const KVM_SET_USER_MEMORY_REGION: u64 = libc::_IOW::<KvmUserspaceMemoryRegion>(KVMIO, 0x46);
 
+#[repr(C)]
 struct KvmUserspaceMemoryRegion {
     slot: u32,
     flags: u32,
@@ -65,7 +67,7 @@ fn create_vcpu(vm_fd: i32) -> io::Result<i32> {
     return Ok(vcpu_fd);
 }
 
-fn allocate_guest_mem() -> *mut libc::c_void {
+fn allocate_guest_mem() -> io::Result<*mut libc::c_void> {
     let addr = unsafe {
         libc::mmap(
             ptr::null_mut(),
@@ -76,7 +78,27 @@ fn allocate_guest_mem() -> *mut libc::c_void {
             0
         )
     };
-    return addr;
+    if addr ==  libc::MAP_FAILED {
+        return Err(io::Error::last_os_error());
+    }
+    return Ok(addr);
+}
+
+fn set_memory(vm_fd: i32, mem: *mut libc::c_void) -> io::Result<()> {
+    let region = KvmUserspaceMemoryRegion {
+        slot: 0,
+        flags: 0,
+        guest_phys_addr: 0x1000,
+        memory_size: MEM_SIZE as u64,
+        userspace_addr: mem as u64,
+    };
+    let ret = unsafe { libc::ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region as *const KvmUserspaceMemoryRegion) };
+    if ret < 0 {
+        let err = Err(io::Error::last_os_error());
+        println!("error setting up guest memory !");
+        return err;
+    }
+    Ok(())
 }
 
 fn main() {
@@ -113,7 +135,20 @@ fn main() {
         }
     };
 
-    let mem = allocate_guest_mem();
-
     println!("vCPU fd = {vcpu_fd}");
+
+    let mem = match allocate_guest_mem() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln! ("error mmap ! {e}");
+            return;
+        }
+    };
+
+    if let Err(e) = set_memory(vm_fd, mem) {
+        eprintln!("error setting up guest memory : {e}");
+        return;
+    }
+
+    println!("Guest memory installed : guest_phys 0x1000, size {MEM_SIZE}");
 }

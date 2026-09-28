@@ -32,3 +32,8 @@
 
 **Done:**
 - Allocating memory
+
+## 2026-09-28 — Day 6
+
+**Done:**
+- Setting up guest memory region
