@@ -27,3 +27,8 @@
 
 **Done:**
 - Creating VM and vCPU
+
+## 2026-09-25 — Day 5
+
+**Done:**
+- Allocating memory

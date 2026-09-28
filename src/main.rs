@@ -1,10 +1,20 @@
 use std::ffi::CString;
 use std::io;
+use std::ptr;
 
 const KVMIO: u32 = 0xAE;
 const KVM_GET_API_VERSION: u64 = libc::_IO(KVMIO, 0x00);
 const KVM_CREATE_VM: u64 = libc::_IO(KVMIO, 0x01);
 const KVM_CREATE_VCPU: u64 = libc::_IO(KVMIO, 0x41);
+const MEM_SIZE: usize = 0x100000;
+
+struct KvmUserspaceMemoryRegion {
+    slot: u32,
+    flags: u32,
+    guest_phys_addr: u64,
+    memory_size: u64,
+    userspace_addr: u64,
+}
 
 fn open_kvm() -> io::Result<i32> {
     let path_kvm = CString::new("/dev/kvm").unwrap();
@@ -55,6 +65,20 @@ fn create_vcpu(vm_fd: i32) -> io::Result<i32> {
     return Ok(vcpu_fd);
 }
 
+fn allocate_guest_mem() -> *mut libc::c_void {
+    let addr = unsafe {
+        libc::mmap(
+            ptr::null_mut(),
+            MEM_SIZE,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_SHARED | libc::MAP_ANONYMOUS,
+            -1,
+            0
+        )
+    };
+    return addr;
+}
+
 fn main() {
     let kvm_fd = match open_kvm() {
         Ok(fd) => {
@@ -88,6 +112,8 @@ fn main() {
             return;
         }
     };
+
+    let mem = allocate_guest_mem();
 
     println!("vCPU fd = {vcpu_fd}");
 }
