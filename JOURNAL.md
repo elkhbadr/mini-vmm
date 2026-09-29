@@ -37,3 +37,9 @@
 
 **Done:**
 - Setting up guest memory region
+
+## 2026-09-28 — Day 7
+
+**Done:**
+- Adding kvm_bindings dependency
+- Test of a guest code that displays value of a register

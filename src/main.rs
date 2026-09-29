@@ -1,22 +1,34 @@
 use std::ffi::CString;
 use std::io;
 use std::ptr;
+use kvm_bindings::{kvm_regs, kvm_sregs, kvm_userspace_memory_region};
 
 const KVMIO: u32 = 0xAE;
 const KVM_GET_API_VERSION: u64 = libc::_IO(KVMIO, 0x00);
 const KVM_CREATE_VM: u64 = libc::_IO(KVMIO, 0x01);
 const KVM_CREATE_VCPU: u64 = libc::_IO(KVMIO, 0x41);
 const MEM_SIZE: usize = 0x100000;
-const KVM_SET_USER_MEMORY_REGION: u64 = libc::_IOW::<KvmUserspaceMemoryRegion>(KVMIO, 0x46);
+const KVM_SET_USER_MEMORY_REGION: u64 = libc::_IOW::<kvm_userspace_memory_region>(KVMIO, 0x46);
+const KVM_RUN: u64 = libc::_IO(KVMIO, 0x80);
+const KVM_GET_REGS: u64 = libc::_IOR::<kvm_regs>(KVMIO, 0x81);
+const KVM_SET_REGS: u64 = libc::_IOW::<kvm_regs>(KVMIO, 0x82);
+const KVM_GET_SREGS: u64 = libc::_IOR::<kvm_sregs>(KVMIO, 0x83);
+const KVM_SET_SREGS: u64 = libc::_IOW::<kvm_sregs>(KVMIO, 0x84);
 
-#[repr(C)]
-struct KvmUserspaceMemoryRegion {
-    slot: u32,
-    flags: u32,
-    guest_phys_addr: u64,
-    memory_size: u64,
-    userspace_addr: u64,
-}
+// We chose the serial port COM1
+const PORT_EXIT: u64 = 0x3f8;
+// mov dx, 0x3f8 
+// out dx, al
+// mov al, '\n'
+// out dx, al
+// hlt
+const GUEST_CODE: [u8; 8] = [
+    0xBA, 0xF8, 0x03, // mov dx, 0x3f8
+    0xEE,             // out dx, al
+    0xB0, b'\n',      // mov al, '\n'
+    0xEE,             // out dx, al
+    0xF4,             // hlt
+];
 
 fn open_kvm() -> io::Result<i32> {
     let path_kvm = CString::new("/dev/kvm").unwrap();
@@ -85,14 +97,14 @@ fn allocate_guest_mem() -> io::Result<*mut libc::c_void> {
 }
 
 fn set_memory(vm_fd: i32, mem: *mut libc::c_void) -> io::Result<()> {
-    let region = KvmUserspaceMemoryRegion {
+    let region = kvm_userspace_memory_region {
         slot: 0,
         flags: 0,
         guest_phys_addr: 0x1000,
         memory_size: MEM_SIZE as u64,
         userspace_addr: mem as u64,
     };
-    let ret = unsafe { libc::ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region as *const KvmUserspaceMemoryRegion) };
+    let ret = unsafe { libc::ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region as *const kvm_userspace_memory_region) };
     if ret < 0 {
         let err = Err(io::Error::last_os_error());
         println!("error setting up guest memory !");
@@ -101,54 +113,52 @@ fn set_memory(vm_fd: i32, mem: *mut libc::c_void) -> io::Result<()> {
     Ok(())
 }
 
-fn main() {
-    let kvm_fd = match open_kvm() {
-        Ok(fd) => {
-            println!("KVM open with success, fd = {fd}");
-            fd
-        }
-        Err(e) => {
-            eprintln!("error opening KVM : {e}");
-            return;
-        }
-    };
+fn load_guest_code(mem: *mut libc::c_void) {
+    unsafe {
+        ptr::copy_nonoverlapping(GUEST_CODE.as_ptr(), mem as *mut u8, GUEST_CODE.len())
+    }
+}
 
-    let vm_fd = match create_vm(kvm_fd) {
-        Ok(fd) => {
-            println!("VM created with success, fd = {fd}");
-            fd
-        }
-        Err(e) => {
-            eprintln!("error creating VM : {e}");
-            return;
-        }
-    };
-
-    let vcpu_fd = match create_vcpu(vm_fd) {
-        Ok(fd) => {
-            println!("vCPU created with success, fd = {fd}");
-            fd
-        }
-        Err(e) => {
-            eprintln!("error creating vCPU : {e}");
-            return;
-        }
-    };
-
-    println!("vCPU fd = {vcpu_fd}");
-
-    let mem = match allocate_guest_mem() {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln! ("error mmap ! {e}");
-            return;
-        }
-    };
-
-    if let Err(e) = set_memory(vm_fd, mem) {
-        eprintln!("error setting up guest memory : {e}");
-        return;
+fn init_vcpu_regs(vcpu_fd: i32) -> io::Result<()> {
+    let mut sregs = kvm_sregs::default();
+    let ret = unsafe { libc::ioctl(vcpu_fd, KVM_GET_SREGS, &mut sregs as *mut kvm_sregs) };
+    if ret < 0 {
+        let err = Err(io::Error::last_os_error());
+        println!("error getting sregs !");
+        return err;
+    }
+    sregs.cs.base = 0;
+    sregs.cs.selector = 0;
+    let ret = unsafe { libc::ioctl(vcpu_fd, KVM_SET_SREGS, &sregs as *const kvm_sregs) };
+    if ret < 0 {
+        let err = Err(io::Error::last_os_error());
+        println!("error setting up sregs !");
+        return err;
     }
 
+    let mut regs = kvm_regs::default();
+    regs.rip = 0x1000 as u64;
+    regs.rax = b'A' as u64;
+    regs.rflags = 0x2 as u64;
+    let ret = unsafe { libc::ioctl(vcpu_fd, KVM_SET_REGS, sregs) };
+    if ret < 0 {
+        let err = Err(io::Error::last_os_error());
+        println!("error setting up regs !");
+        return err;
+    }
+
+    Ok(())
+}
+
+fn main() -> io::Result<()> {
+    let kvm_fd = open_kvm()?;
+    let vm_fd = create_vm(kvm_fd)?;
+    let vcpu_fd = create_vcpu(vm_fd)?;
+    let mem = allocate_guest_mem()?;
+    set_memory(vm_fd, mem)?;
+    load_guest_code(mem);
+    init_vcpu_regs(vcpu_fd)?;
+
     println!("Guest memory installed : guest_phys 0x1000, size {MEM_SIZE}");
+    Ok(())
 }
