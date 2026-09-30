@@ -41,5 +41,10 @@
 ## 2026-09-29 — Day 7
 
 **Done:**
-- Adding kvm_bindings dependency
-- Test of a guest code that displays value of a register
+- Adding kvm-bindings dependency
+
+## 2026-09-30 — Day 8
+
+**Done:**
+- Mmap the structure kvm_run
+- Test of the guest code that displays value of a register

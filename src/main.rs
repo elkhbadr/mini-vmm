@@ -1,22 +1,27 @@
 use std::ffi::CString;
 use std::io;
 use std::ptr;
-use kvm_bindings::{kvm_regs, kvm_sregs, kvm_userspace_memory_region};
+use kvm_bindings::{kvm_regs, kvm_sregs, kvm_userspace_memory_region, kvm_run};
 
 const KVMIO: u32 = 0xAE;
 const KVM_GET_API_VERSION: u64 = libc::_IO(KVMIO, 0x00);
 const KVM_CREATE_VM: u64 = libc::_IO(KVMIO, 0x01);
+const KVM_GET_VCPU_MMAP_SIZE: u64 = libc::_IO(KVMIO, 0x04);
 const KVM_CREATE_VCPU: u64 = libc::_IO(KVMIO, 0x41);
-const MEM_SIZE: usize = 0x100000;
 const KVM_SET_USER_MEMORY_REGION: u64 = libc::_IOW::<kvm_userspace_memory_region>(KVMIO, 0x46);
 const KVM_RUN: u64 = libc::_IO(KVMIO, 0x80);
 const KVM_GET_REGS: u64 = libc::_IOR::<kvm_regs>(KVMIO, 0x81);
 const KVM_SET_REGS: u64 = libc::_IOW::<kvm_regs>(KVMIO, 0x82);
 const KVM_GET_SREGS: u64 = libc::_IOR::<kvm_sregs>(KVMIO, 0x83);
 const KVM_SET_SREGS: u64 = libc::_IOW::<kvm_sregs>(KVMIO, 0x84);
+const KVM_EXIT_IO: u32 = 2;
+const KVM_EXIT_HLT: u32 = 5;
+const KVM_EXIT_IO_OUT: u8 = 1;
 
+
+const MEM_SIZE: usize = 0x100000;
 // We chose the serial port COM1
-const PORT_EXIT: u64 = 0x3f8;
+const PORT_EXIT: u16 = 0x3f8;
 // mov dx, 0x3f8 
 // out dx, al
 // mov al, '\n'
@@ -138,6 +143,7 @@ fn init_vcpu_regs(vcpu_fd: i32) -> io::Result<()> {
 
     let mut regs = kvm_regs::default();
     regs.rip = 0x1000 as u64;
+    // We put A in the register rax
     regs.rax = b'A' as u64;
     regs.rflags = 0x2 as u64;
     let ret = unsafe { libc::ioctl(vcpu_fd, KVM_SET_REGS, &regs as *const kvm_regs) };
@@ -150,6 +156,74 @@ fn init_vcpu_regs(vcpu_fd: i32) -> io::Result<()> {
     Ok(())
 }
 
+fn init_kvm_run(kvm: i32, vcpu_fd: i32) -> io::Result<*mut kvm_run> {
+    let mmap_size = unsafe { libc::ioctl(kvm, KVM_GET_VCPU_MMAP_SIZE, 0) };
+    if mmap_size < 0 {
+        let err = Err(io::Error::last_os_error());
+        println!("error getting vcpu mmap size !");
+        return err;
+    }
+    let run = unsafe {
+        libc::mmap(
+            ptr::null_mut(),
+            mmap_size as usize,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_SHARED,
+            vcpu_fd,
+            0
+        )
+    };
+    if run ==  libc::MAP_FAILED {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(run as *mut kvm_run)
+}
+
+fn run_instructions(vcpu_fd: i32, run: *mut kvm_run) -> io::Result<()> {
+    loop {
+        let ret = unsafe { libc::ioctl(vcpu_fd, KVM_RUN, 0) };
+        if ret < 0 {
+            let err = Err(io::Error::last_os_error());
+            println!("error calling KVM_RUN on cpu_fd = {vcpu_fd} !");
+            return err;
+        }
+        let exit_reason = unsafe { ptr::read_volatile(&(*run).exit_reason) };
+        match exit_reason {
+            KVM_EXIT_HLT => {
+                println!("EXIT: HLT");
+                break;
+            }
+            KVM_EXIT_IO => {
+                let io = unsafe { &(*run).__bindgen_anon_1.io };
+                if io.port == PORT_EXIT 
+                    && io.direction == KVM_EXIT_IO_OUT 
+                    && io.count == 1 && io.size == 1
+                {
+                    let byte = unsafe { *(run as *const u8).add(io.data_offset as usize) };
+                    print!("{}", byte as char);
+                }
+                else {
+                    let err = Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        format!("unhandled KVM_EXIT_IO"),
+                    ));
+                    println!("unhandled KVM_EXIT_IO !");
+                    return err;
+                }
+            }
+            _ => {
+                let err = Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    format!("unhandled exit"),
+                ));
+                println!("unhandled exit !");
+                return err;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn main() -> io::Result<()> {
     let kvm_fd = open_kvm()?;
     let vm_fd = create_vm(kvm_fd)?;
@@ -158,7 +232,9 @@ fn main() -> io::Result<()> {
     set_memory(vm_fd, mem)?;
     load_guest_code(mem);
     init_vcpu_regs(vcpu_fd)?;
+    let run = init_kvm_run(kvm_fd, vcpu_fd)?;
+    run_instructions(vcpu_fd, run)?;
 
-    println!("Guest memory installed : guest_phys 0x1000, size {MEM_SIZE}");
+    println!("Instructions run");
     Ok(())
 }
