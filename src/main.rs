@@ -140,7 +140,7 @@ fn init_vcpu_regs(vcpu_fd: i32) -> io::Result<()> {
     regs.rip = 0x1000 as u64;
     regs.rax = b'A' as u64;
     regs.rflags = 0x2 as u64;
-    let ret = unsafe { libc::ioctl(vcpu_fd, KVM_SET_REGS, sregs) };
+    let ret = unsafe { libc::ioctl(vcpu_fd, KVM_SET_REGS, &regs as *const kvm_regs) };
     if ret < 0 {
         let err = Err(io::Error::last_os_error());
         println!("error setting up regs !");

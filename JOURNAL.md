@@ -38,7 +38,7 @@
 **Done:**
 - Setting up guest memory region
 
-## 2026-09-28 — Day 7
+## 2026-09-29 — Day 7
 
 **Done:**
 - Adding kvm_bindings dependency
