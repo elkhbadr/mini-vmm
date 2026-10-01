@@ -48,3 +48,8 @@
 **Done:**
 - Mmap the structure kvm_run
 - Test of the guest code that displays value of a register
+
+## 2026-09-30 — Day 9
+
+**Done:**
+- Handle string I/O (count > 1) in KVM_EXIT_IO

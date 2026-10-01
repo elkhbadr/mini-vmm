@@ -34,6 +34,20 @@ const GUEST_CODE: [u8; 8] = [
     0xEE,             // out dx, al
     0xF4,             // hlt
 ];
+// mov dx, 0x3f8 
+// mov si, 0x100C
+// mov cx, 12
+// rep outsb
+// hlt
+const GUEST_CODE2: [u8; 25] = [
+    0xBA, 0xF8, 0x03, // mov dx, 0x3f8
+    0xBE, 0x0C, 0x10, // mov si, 0x100C
+    0xB9, 0x0D, 0x00, // mov cx, 12
+    0xF3, 0x6e,       // rep outsb
+    0xF4,             // hlt
+    b'H', b'e', b'l', b'l', b'o', b' ',
+    b'W', b'o', b'r', b'l', b'd', b'!', b'\n',
+];
 
 fn open_kvm() -> io::Result<i32> {
     let path_kvm = CString::new("/dev/kvm").unwrap();
@@ -197,10 +211,12 @@ fn run_instructions(vcpu_fd: i32, run: *mut kvm_run) -> io::Result<()> {
                 let io = unsafe { &(*run).__bindgen_anon_1.io };
                 if io.port == PORT_EXIT 
                     && io.direction == KVM_EXIT_IO_OUT 
-                    && io.count == 1 && io.size == 1
+                    && io.size == 1
                 {
-                    let byte = unsafe { *(run as *const u8).add(io.data_offset as usize) };
-                    print!("{}", byte as char);
+                    for i in 0..io.count as usize {
+                        let byte = unsafe { *(run as *const u8).add(io.data_offset as usize + i) };
+                        print!("{}", byte as char);
+                    }   
                 }
                 else {
                     let err = Err(io::Error::new(
@@ -230,7 +246,7 @@ fn main() -> io::Result<()> {
     let vcpu_fd = create_vcpu(vm_fd)?;
     let mem = allocate_guest_mem()?;
     set_memory(vm_fd, mem)?;
-    load_guest_code(mem, &GUEST_CODE);
+    load_guest_code(mem, &GUEST_CODE2);
     init_vcpu_regs(vcpu_fd)?;
     let run = init_kvm_run(kvm_fd, vcpu_fd)?;
     run_instructions(vcpu_fd, run)?;
