@@ -16,12 +16,14 @@ const KVM_GET_SREGS: u64 = libc::_IOR::<kvm_sregs>(KVMIO, 0x83);
 const KVM_SET_SREGS: u64 = libc::_IOW::<kvm_sregs>(KVMIO, 0x84);
 const KVM_EXIT_IO: u32 = 2;
 const KVM_EXIT_HLT: u32 = 5;
+const KVM_EXIT_IO_IN: u8 = 0;
 const KVM_EXIT_IO_OUT: u8 = 1;
 
-
+const IN_VALUE: u8 = 0x67;
 const MEM_SIZE: usize = 0x100000;
 // We chose the serial port COM1
-const PORT_EXIT: u16 = 0x3f8;
+const PORT_OUT: u16 = 0x3f8;
+const PORT_IN: u16 = 0x3f9;
 // mov dx, 0x3f8 
 // out dx, al
 // mov al, '\n'
@@ -47,6 +49,14 @@ const GUEST_CODE2: [u8; 25] = [
     0xF4,             // hlt
     b'H', b'e', b'l', b'l', b'o', b' ',
     b'W', b'o', b'r', b'l', b'd', b'!', b'\n',
+];
+// mov dx, 0x3f9
+// in al, dx
+// hlt
+const GUEST_CODE_IN: [u8; 5] =  [
+    0xBA, 0xF9, 0x03, // mov dx, 0x3f9
+    0xEC,             // in al, dx
+    0xF4,             // hlt
 ];
 
 fn open_kvm() -> io::Result<i32> {
@@ -157,8 +167,8 @@ fn init_vcpu_regs(vcpu_fd: i32) -> io::Result<()> {
 
     let mut regs = kvm_regs::default();
     regs.rip = 0x1000 as u64;
-    // We put A in the register rax
-    regs.rax = b'A' as u64;
+    // We put 0xAABBCCDD in the register rax for testing when changing al
+    regs.rax = 0xAABBCCDD as u64;
     regs.rflags = 0x2 as u64;
     let ret = unsafe { libc::ioctl(vcpu_fd, KVM_SET_REGS, &regs as *const kvm_regs) };
     if ret < 0 {
@@ -205,18 +215,35 @@ fn run_instructions(vcpu_fd: i32, run: *mut kvm_run) -> io::Result<()> {
         match exit_reason {
             KVM_EXIT_HLT => {
                 println!("EXIT: HLT");
+                let mut regs = kvm_regs::default();
+                let ret = unsafe { libc::ioctl(vcpu_fd, KVM_GET_REGS, &mut regs as *mut kvm_regs) };
+                if ret < 0 {
+                    let err = Err(io::Error::last_os_error());
+                    println!("error getting regs !");
+                    return err;
+                }
+
+                println!("rax = {:#018x}", regs.rax);
+                println!("al  = {:#04x}", regs.rax & 0xff);
+                println!("rip = {:#x}", regs.rip);
                 break;
             }
             KVM_EXIT_IO => {
                 let io = unsafe { &(*run).__bindgen_anon_1.io };
-                if io.port == PORT_EXIT 
-                    && io.direction == KVM_EXIT_IO_OUT 
+                if io.port == PORT_OUT 
+                    && io.direction == KVM_EXIT_IO_OUT
                     && io.size == 1
                 {
                     for i in 0..io.count as usize {
                         let byte = unsafe { *(run as *const u8).add(io.data_offset as usize + i) };
                         print!("{}", byte as char);
                     }   
+                }
+                else if io.port == PORT_IN
+                    && io.direction == KVM_EXIT_IO_IN
+                    && io.size == 1
+                {
+                    unsafe { *(run as *mut u8).add(io.data_offset as usize) = IN_VALUE; };
                 }
                 else {
                     let err = Err(io::Error::new(
@@ -246,7 +273,7 @@ fn main() -> io::Result<()> {
     let vcpu_fd = create_vcpu(vm_fd)?;
     let mem = allocate_guest_mem()?;
     set_memory(vm_fd, mem)?;
-    load_guest_code(mem, &GUEST_CODE2);
+    load_guest_code(mem, &GUEST_CODE_IN);
     init_vcpu_regs(vcpu_fd)?;
     let run = init_kvm_run(kvm_fd, vcpu_fd)?;
     run_instructions(vcpu_fd, run)?;
