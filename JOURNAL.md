@@ -54,3 +54,5 @@
 **Done:**
 - Handle string I/O (count > 1) in KVM_EXIT_IO
 - Handle KVM_EXIT_IO_IN
+- Adding kvm-ioctls dependency
+- Adapt the code to kvm-ioctls (drop raw ioctls constants)
