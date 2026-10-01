@@ -118,9 +118,9 @@ fn set_memory(vm_fd: i32, mem: *mut libc::c_void) -> io::Result<()> {
     Ok(())
 }
 
-fn load_guest_code(mem: *mut libc::c_void) {
+fn load_guest_code(mem: *mut libc::c_void, code: &[u8]) {
     unsafe {
-        ptr::copy_nonoverlapping(GUEST_CODE.as_ptr(), mem as *mut u8, GUEST_CODE.len())
+        ptr::copy_nonoverlapping(code.as_ptr(), mem as *mut u8, code.len())
     }
 }
 
@@ -230,7 +230,7 @@ fn main() -> io::Result<()> {
     let vcpu_fd = create_vcpu(vm_fd)?;
     let mem = allocate_guest_mem()?;
     set_memory(vm_fd, mem)?;
-    load_guest_code(mem);
+    load_guest_code(mem, &GUEST_CODE);
     init_vcpu_regs(vcpu_fd)?;
     let run = init_kvm_run(kvm_fd, vcpu_fd)?;
     run_instructions(vcpu_fd, run)?;
