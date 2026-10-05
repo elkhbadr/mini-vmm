@@ -45,6 +45,26 @@ const GUEST_CODE_IN: [u8; 5] =  [
     0xF4,             // hlt
 ];
 
+struct SerialDevice {
+    in_value: u8
+}
+
+impl SerialDevice {
+    fn new(in_value: u8) -> Self {
+        Self { in_value }
+    }
+
+    fn handle_out(&mut self, data: &[u8]) {
+        for &byte in data {
+            print!("{}", byte as char);
+        }
+    }
+
+    fn handle_in(&mut self) -> u8 {
+        self.in_value
+    }
+}
+
 fn open_kvm() -> io::Result<Kvm> {
     let kvm = Kvm::new()?;
     let version = kvm.get_api_version();
@@ -112,7 +132,7 @@ fn init_vcpu_regs(vcpu: &VcpuFd) -> io::Result<()> {
     Ok(())
 }
 
-fn run_instructions(vcpu: &mut VcpuFd) -> io::Result<()> {
+fn run_instructions(vcpu: &mut VcpuFd, serial: &mut SerialDevice) -> io::Result<()> {
     loop {
         match vcpu.run()? {
             VcpuExit::Hlt => {
@@ -124,12 +144,12 @@ fn run_instructions(vcpu: &mut VcpuFd) -> io::Result<()> {
                 break;
             }
             VcpuExit::IoOut(port, data) if port == PORT_OUT => {
-                for &byte in data {
-                    print!("{}", byte as char);
-                }
+                serial.handle_out(data);
             }
             VcpuExit::IoIn(port, data) if port == PORT_IN => {
-                data.fill(IN_VALUE);
+                for b in data.iter_mut() {
+                    *b = serial.handle_in();
+                }
             }
             
             exit => {
@@ -152,7 +172,9 @@ fn main() -> io::Result<()> {
     set_memory(&vm, mem)?;
     load_guest_code(mem, &GUEST_CODE_IN);
     init_vcpu_regs(&vcpu)?;
-    run_instructions(&mut vcpu)?;
+
+    let mut serial = SerialDevice::new(IN_VALUE);
+    run_instructions(&mut vcpu, &mut serial)?;
 
     println!("Instructions run");
     Ok(())
