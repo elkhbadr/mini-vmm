@@ -157,6 +157,10 @@ fn run_instructions(vcpu: &mut VcpuFd, serial: &mut SerialDevice) -> io::Result<
                     io::ErrorKind::Unsupported,
                     format!("unhandled exit: {exit:?}"),
                 ));
+                let regs = vcpu.get_regs()?;
+                println!("rax = {:#018x}", regs.rax);
+                println!("al  = {:#04x}", regs.rax & 0xff);
+                println!("rip = {:#x}", regs.rip);
                 return err;
             }
         }
